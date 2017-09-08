@@ -213,7 +213,7 @@ function radialHeatmap(element, chartData, settings) {
       selecting = false;
       var mouse = d3.mouse(this);
       currentSelection = getSelection(mouse);
-      if (currentSelection.slice > 0 && currentSelection.segment > 0) {
+      if (currentSelection.slice >= 0 && currentSelection.segment >= 0) {
         var slices = [];
         selectedSlices.forEach(function (slice) {
           slices.push(uniqueSlices[slice]);
