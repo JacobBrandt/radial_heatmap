@@ -19,8 +19,8 @@ function radialHeatmap(element, chartData, settings) {
   var selectedSlice = -1;
   var selectedSegment = -1;
   var selecting = false;
-  var selectedSlices = [];
   var selectedSegments = [];
+  var selectedSlices = [];
   var startSelection = null;
   var currentSelection = null;
 
@@ -36,7 +36,7 @@ function radialHeatmap(element, chartData, settings) {
   var twoPi = Math.PI * 2;
   var halfPi = Math.PI / 2;
 
-  // Gather data
+  // Get max, sliceSize and uniqueSlices
   var max = 0;
   var uniqueSlices = [];
   chartData.forEach(function (segment) {
@@ -91,8 +91,10 @@ function radialHeatmap(element, chartData, settings) {
 
   // Populate arc angles
   var startRadian, endRadian;
-  chartData.forEach(function (segment) {
+  chartData.forEach(function (segment, segmentIndex) {
     var startValue = 0;
+    var seriesRadius = interpolate((chartData.length - segmentIndex) / chartData.length, minRadius, radius);
+    segment.radius = seriesRadius;
     segment.data.forEach(function (slice) {
       var value = sliceSize;
       startRadian = map(startValue, 0, 100, 0, twoPi);
@@ -126,29 +128,43 @@ function radialHeatmap(element, chartData, settings) {
     radAngle = Math.abs(radAngle);
 
     var distance = distanceFromOrigin(pos.x, pos.y);
-    var selSlice, selSegment = -1;
-    chartData.forEach(function (segment, segmentIndex) {
+    var selSlice, selSegment;
+    selSlice = selSegment = -1;
+    for (var segmentIndex = 0; segmentIndex < chartData.length; segmentIndex++) {
+      if (selSegment !== -1) {
+        break;
+      }
+      var segment = chartData[segmentIndex];
+      var nextSegment = chartData[segmentIndex + 1];
+      if (!nextSegment) {
+        break;
+      }
+      var innerRadius = Math.max(minRadius, nextSegment.radius);
+      if (segment.radius >= distance && innerRadius <= distance) {
+        selSegment = segmentIndex;
+      }
+      else {
+        continue;
+      }
+
       var startValue = 0;
       var startRadian = 0;
       var endRadian = 0;
       var seriesRadius = interpolate((chartData.length - segmentIndex) / chartData.length, minRadius, radius);
-      segment.data.forEach(function (slice, sliceIndex) {
+      for (var sliceIndex = 0; sliceIndex < segment.data.length; sliceIndex++) {
+        if (selSlice !== -1 && sliceIndex !== selSlice) {
+          break;
+        }
+        var slice = segment.data[sliceIndex];
         var value = sliceSize;
         startRadian = slice.startRadian;
         endRadian = slice.endRadian;
         startValue += value;
         if (startRadian <= radAngle && radAngle <= endRadian) {
           selSlice = sliceIndex;
-          if (seriesRadius >= distance) {
-            var nextRadius = interpolate((chartData.length - (segmentIndex + 1)) / chartData.length, minRadius, radius);
-            var innerRadius = Math.max(minRadius, nextRadius);
-            if (innerRadius <= distance) {
-              selSegment = segmentIndex;
-            }
-          }
         }
-      });
-    });
+      }
+    }
 
     return {
       slice: selSlice,
@@ -163,7 +179,7 @@ function radialHeatmap(element, chartData, settings) {
       .attr("class", "radial-heatmap-canvas")
       .attr("width", chartWidth)
       .attr("height", chartHeight)
-      .style("cursor", "move")
+      .style("cursor", "crosshair")
       .style("position", "absolute")
       .style("z-index", "-1")
       .style("left", margin.left + "px")
@@ -197,15 +213,17 @@ function radialHeatmap(element, chartData, settings) {
       selecting = false;
       var mouse = d3.mouse(this);
       currentSelection = getSelection(mouse);
-      var slices = [];
-      selectedSlices.forEach(function (slice) {
-        slices.push(uniqueSlices[slice]);
-      });
-      var segments = [];
-      selectedSegments.forEach(function (segment) {
-        segments.push(chartData[segment].name);
-      });
-      onSelection(slices, segments, chartData, uniqueSlices);
+      if (currentSelection.slice > 0 && currentSelection.segment > 0) {
+        var slices = [];
+        selectedSlices.forEach(function (slice) {
+          slices.push(uniqueSlices[slice]);
+        });
+        var segments = [];
+        selectedSegments.forEach(function (segment) {
+          segments.push(chartData[segment].name);
+        });
+        onSelection(slices, segments);
+      }
       startSelection = null;
     });
     canvas.on("mouseleave", function (event) {
@@ -224,19 +242,92 @@ function radialHeatmap(element, chartData, settings) {
       if (prevSlice !== selectedSlice || prevSegment !== selectedSegment) {
         if (selecting) {
           currentSelection = selection;
-          if (startSelection.slice == currentSelection.slice) {
+          // Find slice direction and fill in gaps
+          var clockwise = false;
+          var startIdx = startSelection.slice;
+          var currentIdx = currentSelection.slice;
+          if (currentIdx === startIdx) {
             selectedSlices = [];
-            selectedSlices.push(startSelection.slice)
           }
-          if (selectedSlices.length >= 3 && currentSelection.slice === selectedSlices[selectedSlices.length - 2]) {
-            selectedSlices.pop();
+
+          if (selectedSlices.length >= 2) {
+            // We can get direction from previous selected slices
+            startIdx = selectedSlices[0];
+            currentIdx = selectedSlices[1];
           }
-          else if (startSelection.slice !== currentSelection.slice && currentSelection.slice !== selectedSlices[selectedSlices.length - 1]) {
-            if (currentSelection.slice !== undefined) {
-              selectedSlices.push(currentSelection.slice);
+          // See if we crossed over between quadrant 1 and 4
+          var startQuadrant, currentQuadrant;
+          if (startIdx >= uniqueSlices.length * .75) {
+            startQuadrant = 4;
+          }
+          else if (startIdx <= uniqueSlices.length * .25) {
+            startQuadrant = 1;
+          }
+          if (currentIdx >= uniqueSlices.length * .75) {
+            currentQuadrant = 4;
+          }
+          else if (currentIdx <= uniqueSlices.length * .25) {
+            currentQuadrant = 1;
+          }
+          if (startQuadrant && currentQuadrant && startQuadrant !== currentQuadrant) {
+            startIdx = -startIdx;
+            currentIdx = -currentIdx;
+          }
+
+          if (startIdx < currentIdx) {
+            clockwise = true;
+          }
+          else if (startIdx > currentIdx) {
+            clockwise = false;
+          }
+
+          // Now that we know the direction select the slices from start to current
+          startIdx = startSelection.slice;
+          currentIdx = currentSelection.slice;
+          if (clockwise) {
+            if (startIdx < currentIdx) {
+              selectedSlices = [];
+              for (var i = startIdx; i <= currentIdx; i++) {
+                selectedSlices.push(i);
+              }
+            }
+            else if (startIdx > currentIdx) {
+              // Cross over
+              selectedSlices = [];
+              var i;
+              for (i = startIdx; i <= uniqueSlices.length - 1; i++) {
+                selectedSlices.push(i);
+              }
+              for (i = 0; i <= currentIdx; i++) {
+                selectedSlices.push(i);
+              }
+            }
+          }
+          else if (!clockwise) {
+            if (startIdx > currentIdx) {
+              selectedSlices = [];
+              for (var i = startIdx; i >= currentIdx; i--) {
+                selectedSlices.push(i);
+              }
+            }
+            else if (startIdx < currentIdx) {
+              // Cross over
+              selectedSlices = [];
+              var i;
+              for (i = startIdx; i >= 0; i--) {
+                selectedSlices.push(i);
+              }
+              for (i = uniqueSlices.length - 1; i >= currentIdx; i--) {
+                selectedSlices.push(i);
+              }
             }
           }
 
+          if (selectedSlices.length === 0) {
+            selectedSlices.push(currentSelection.slice);
+          }
+
+          // Fill gaps for segments
           selectedSegments = [];
           var startIdx = startSelection.segment;
           var currentIdx = currentSelection.segment;
@@ -289,14 +380,6 @@ function radialHeatmap(element, chartData, settings) {
 
   function map(value, min1, max1, min2, max2) {
     return interpolate(normalize(value, min1, max1), min2, max2);
-  }
-
-  function getRandomFillStyleColor() {
-    var c = [];
-    for (var i = 0; i < 3; i++) {
-      c[i] = Math.floor(Math.random() * 255);
-    }
-    return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
   }
 
   function drawPieChart(ctx, selecting) {
@@ -360,6 +443,7 @@ function radialHeatmap(element, chartData, settings) {
       radius * holePercent * 2 + 2, radius * holePercent * 2 + 2);
     ctx.restore();
 
+
     if (currentSelection && currentSelection.slice >= 0 && currentSelection.segment >= 0) {
       var data, value;
       chartData.forEach(function (segment, segmentIndex) {
@@ -389,15 +473,13 @@ function radialHeatmap(element, chartData, settings) {
   }
 
   function drawCanvas() {
-    var colors = [];
-    while (colors.length != chartData.length) {
-      colors.push(getRandomFillStyleColor());
-    }
-
-    canvas.style("opacity", selectedSegment === -1 ? 1 : 0.6);
+    // Make full chart less visible while selecting
+    canvas.style("opacity", selectedSegment === -1 ? 1 : 0.7);
 
     // Full chart
-    drawPieChart(graphCtx, false);
+    if (selectedSegment === -1) {
+      drawPieChart(graphCtx, false);
+    }
 
     // Selected chart
     if (selectedSlices.length && selectedSegments.length) {
@@ -424,6 +506,7 @@ function radialHeatmap(element, chartData, settings) {
     uniqueSlices.forEach(function (slice, sliceIndex) {
       var value = sliceSize;
       if (uniqueSlices.length > 25) {
+        // Too many slices to show all labels so start spacing them out
         var mod = Math.ceil(uniqueSlices.length / 25);
         if (sliceIndex % mod !== 0) {
           startValue += value;
@@ -434,8 +517,6 @@ function radialHeatmap(element, chartData, settings) {
       sliceFormat = sliceFormat.slice(sliceFormat.indexOf(":") + 1, sliceFormat.length);
       sliceFormat.trim();
       startRadian = map(startValue, 0, 100, 0, twoPi);
-      var midRadian = map(startValue + value / 2, 0, 100, 0, twoPi);
-      endRadian = map(startValue + value, 0, 100, 0, twoPi);
       if ((sliceIndex) > uniqueSlices.length / 2) {
         selectedCtx.textAlign = "right";
       }

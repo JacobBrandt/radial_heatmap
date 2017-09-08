@@ -91,10 +91,10 @@ module.controller('RadialHeatmapController', function ($scope, $timeout, $elemen
           }
         });
 
-        function applyFilters(selectedSlices, selectedSegments, data, slices) {
+        function applyFilters(selectedSlices, selectedSegments) {
           console.log(selectedSlices, selectedSegments);
-          var sliceFilter = getFilter(selectedSlices, "slices", data, slices);
-          var segmentFilter = getFilter(selectedSegments, "segments", data, slices);
+          var sliceFilter = getFilter(selectedSlices, "slices");
+          var segmentFilter = getFilter(selectedSegments, "segments");
           applyFilter(sliceFilter, "slices");
           applyFilter(segmentFilter, "segments");
           console.log(sliceFilter);
@@ -110,15 +110,15 @@ module.controller('RadialHeatmapController', function ($scope, $timeout, $elemen
           }
         }
 
-        function getFilter(values, schemaName, data, slices) {
+        function getFilter(values, schemaName) {
           var agg = scope.vis.aggs.bySchemaName[schemaName][0];
           var type = agg.params.field.type;
           var filter;
           if (type === "number") {
-            filter = getNumberFilter(values, schemaName, data, slices);
+            filter = getNumberFilter(values, schemaName);
           }
           else if (type === "date") {
-            filter = getNumberFilter(values, schemaName, data, slices);
+            filter = getNumberFilter(values, schemaName);
             if (filter.bool === undefined) {
               console.log("apply time filter");
               // Only one range so it was a continuous time range and not disjointed.
@@ -146,7 +146,7 @@ module.controller('RadialHeatmapController', function ($scope, $timeout, $elemen
           return filter;
         }
 
-        function getNumberFilter(values, schemaName, data, slices) {
+        function getNumberFilter(values, schemaName) {
           let newFilter = {
             meta: {
               index: scope.vis.indexPattern.id,
